@@ -1,0 +1,114 @@
+\usepackage{xparse}
+\usepackage{shellesc}
+
+\newcommand{\budouxspecialchar}{} % 0xF002
+
+\ExplSyntaxOn
+
+\iow_new:N \l__orig_file_stream
+
+\cs_new:Npn \__write_orig_file:nn #1 #2 {
+  \iow_open:Nn \l__orig_file_stream { #1 }
+  \iow_now:Nn \l__orig_file_stream { #2 }
+  \iow_close:N \l__orig_file_stream
+}
+
+\iow_new:N \l__processed_file_stream
+\tl_new:N \l__processed_tl
+
+\cs_new:Npn \__read_processed_file:n #1 {
+  \tl_clear:N \l__processed_tl
+  \ior_open:Nn \l__processed_file_stream { #1 }
+  \ior_map_inline:Nn \l__processed_file_stream {
+    \tl_put_right:Nn \l__processed_tl { ##1 }
+  }
+  \ior_close:N \l__processed_file_stream
+}
+
+\int_new:N \l__count_int
+\bool_new:N \l__is_alphabet_bool
+
+\cs_new:Npn \__insert_between_chars_rec:nn #1 #2 {
+  % \tl_analysis_show:n { #2 }
+  \int_incr:N \l__count_int
+
+  \tl_if_empty:nTF { #2 } {} {
+    \tl_if_head_is_group:nTF { #2 } {
+      \tl_put_right:Nn \l__output_tl { \bgroup }
+      \tl_clear_new:N \l__next_group_tl
+      \exp_args:Nne \tl_set:Nn \l__next_group_tl { \tl_head:n { #2 } }
+      \tl_replace_all:Nnn \l__next_group_tl { ~ } { \c_space_token }
+      \exp_args:Nno \__insert_between_chars_rec:nn { #1 } { \l__next_group_tl }
+      \tl_put_right:Nn \l__output_tl { \egroup }
+
+      \exp_args:Nne \__insert_between_chars_rec:nn { #1 } { \tl_tail:n { #2 } }
+    } {
+      \exp_args:Nnx \tl_if_head_eq_charcode:nNTF { #2 } { \char_generate:nn { "F002 } { 12 } } {
+        \int_set:Nn \l__count_int { 0 }
+        % Skip the space right after the special character (the newlines added by BudouX)
+        \exp_args:Nne \__insert_between_chars_rec:nn { #1 } { \exp_args:Ne \tl_tail:n { \tl_tail:n { #2 } } }
+      } {
+        \tl_if_head_is_space:nTF { #2 } {
+          \tl_put_right:Nn \l__output_tl { \tl_head:n { ~ } }
+        } {}
+
+        \exp_args:Nnx \regex_match:nnTF { [!\#\$\%&'()*+,-./:;<=>?@[\]^_`{|}~0-9a-zA-Z] } { \tl_head:n { #2 } } {
+          \bool_if:nTF {
+            \int_compare_p:nNn { \l__count_int } > { 1 } && !\l__is_alphabet_bool
+          } {
+            \tl_put_right:Nn \l__output_tl { #1 }
+          }{}
+
+          \bool_set_true:N \l__is_alphabet_bool
+        } {
+          \int_compare:nNnTF { \l__count_int } > { 1 } {
+            \tl_put_right:Nn \l__output_tl { #1 }
+          }{}
+
+          \bool_set_false:N \l__is_alphabet_bool
+        }
+
+        \exp_args:NNe \tl_put_right:Nn \l__output_tl { \tl_head:n { #2 } }
+        \exp_args:Nne \__insert_between_chars_rec:nn { #1 } { \tl_tail:n { #2 } }
+      }
+    }
+  }
+}
+
+\cs_new:Npn \__insert_between_chars:nn #1 #2 {
+  \tl_clear_new:N \l__input_tl
+  \tl_set:Nn \l__input_tl { #2 }
+  \tl_replace_all:Nnn \l__input_tl { ~ } { \c_space_token }
+
+  \int_set:Nn \l__count_int { 0 }
+  \bool_set_false:N \l__is_alphabet_bool
+  \tl_clear_new:N \l__output_tl
+  \exp_args:Nno \__insert_between_chars_rec:nn { #1 } { \l__input_tl }
+  \tl_use:N \l__output_tl
+}
+
+\cs_new:Npn \__insert_nolinebreak:n #1 {
+  \__insert_between_chars:nn { \nolinebreak[3] } { #1 }
+}
+
+\newcommand{\budouximpl}[1]{
+  \__read_processed_file:n { #1 }
+  \exp_args:No \__insert_nolinebreak:n { \l__processed_tl }
+}
+
+\newcommand{\outputorigfileimpl}[2]{
+  \__write_orig_file:nn { #1 } { #2 }
+}
+
+\ExplSyntaxOff
+
+\NewDocumentCommand{\budoux}{O{\raggedright} m}{{%
+  \newcommand\origfile{_budoux-\jobname-original.txt}%
+  \newcommand\processedfile{_budoux-\jobname-processed.txt}%
+  \outputorigfileimpl{\origfile}{#2}
+  \ShellEscape{export LC_ALL=C.UTF-8; cat \origfile | budoux | sed 's/$/\budouxspecialchar/' > \processedfile}%
+  #1%
+  \budouximpl{\processedfile}\par%
+  \ShellEscape{rm \origfile}%
+  \ShellEscape{rm \processedfile}%
+}}
