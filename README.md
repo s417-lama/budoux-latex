@@ -4,6 +4,8 @@
 
 ## Usage
 
+Put [budoux.sty](./budoux.sty) in your working directory and then,
+
 ```latex
 \usepackage{budoux}
 
